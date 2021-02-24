@@ -14,6 +14,8 @@ export class PostResolver {
     return em.findOne(Post, { id });
   }
 
+  // hey look at me i made a change here and now i cant be found wow howwwwww dumb
+
   @Mutation(() => Post)
   async createPost(
     @Arg("title") title: string,

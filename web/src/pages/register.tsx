@@ -1,18 +1,10 @@
 import React from "react";
 import { Formik, Form } from "formik";
-import {
-  Box,
-  Button,
-  FormControl,
-  FormErrorMessage,
-  FormLabel,
-  Input,
-  propNames,
-} from "@chakra-ui/react";
-import { getValueTransition } from "framer-motion/types/animation/utils/transitions";
+import { Box, Button } from "@chakra-ui/react";
+//import { getValueTransition } from "framer-motion/types/animation/utils/transitions";
 import { Wrapper } from "../components/Wrapper";
 import { InputField } from "../components/InputField";
-import { useMutation } from "urql";
+//import { useMutation } from "urql";
 import { useRegisterMutation } from "../generated/graphql";
 import { toErrorMap } from "../utils/toErrorMap";
 import { useRouter } from "next/router";
