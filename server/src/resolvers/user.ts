@@ -2,7 +2,6 @@ import {
   Resolver,
   Mutation,
   Arg,
-  InputType,
   Field,
   Ctx,
   ObjectType,
@@ -11,16 +10,12 @@ import {
 import { MyContext } from "../types";
 import { User } from "../entities/User";
 import argon2 from "argon2";
-import { COOKIE_NAME } from "src/constants";
-//import { EntityManager } from "@mikro-orm/postgresql";
-
-@InputType()
-class UsernamePasswordInput {
-  @Field()
-  username: string;
-  @Field()
-  password: string;
-}
+import { COOKIE_NAME, FORGET_PASSWORD_PREFIX } from "../constants";
+import { UsernamePasswordInput } from "./UsernamePasswordInput";
+import { validateRegister } from "../utils/validateRegister";
+import { sendEmail } from "../utils/sendEmail";
+import { v4 } from "uuid";
+import { getConnection } from "typeorm";
 
 @ObjectType()
 class FieldError {
@@ -41,80 +36,132 @@ class UserResponse {
 
 @Resolver()
 export class UserResolver {
-  @Query(() => User, { nullable: true })
-  async me(@Ctx() { req, em }: MyContext) {
-    // this helps explain process of whats happening with sessions and redis when it sets a cookie for a user then uses said signed cookie to go ab getting info from redis
-    console.log("session: ", req.session);
+  @Mutation(() => UserResponse)
+  async changePassword(
+    @Arg("token") token: string,
+    @Arg("newPassword") newPassword: string,
+    @Ctx() { redisClient, req }: MyContext
+  ): Promise<UserResponse> {
+    if (newPassword.length <= 2) {
+      return {
+        errors: [
+          {
+            field: "newPassword",
+            message: "length must be greater than 2",
+          },
+        ],
+      };
+    }
 
-    //you are not logged in
+    const key = FORGET_PASSWORD_PREFIX + token;
+    const userId = await redisClient.get(key);
+    if (!userId) {
+      return {
+        errors: [
+          {
+            field: "token",
+            message: "token expired",
+          },
+        ],
+      };
+    }
+
+    const userIdNum = parseInt(userId);
+    const user = await User.findOne(userIdNum);
+
+    if (!user) {
+      return {
+        errors: [
+          {
+            field: "token",
+            message: "user no longer exists",
+          },
+        ],
+      };
+    }
+
+    await User.update(
+      { id: userIdNum },
+      {
+        password: await argon2.hash(newPassword),
+      }
+    );
+
+    await redisClient.del(key);
+
+    // log in user after change password
+    req.session.UserID = user.id;
+
+    return { user };
+  }
+
+  @Mutation(() => Boolean)
+  async forgotPassword(
+    @Arg("email") email: string,
+    @Ctx() { redisClient }: MyContext
+  ) {
+    const user = await User.findOne({ where: { email } });
+    if (!user) {
+      // the email is not in the db
+      return true;
+    }
+
+    const token = v4();
+
+    await redisClient.set(
+      FORGET_PASSWORD_PREFIX + token,
+      user.id,
+      "ex",
+      1000 * 60 * 60 * 24 * 3
+    ); // 3 days
+
+    await sendEmail(
+      email,
+      `<a href="http://localhost:3000/change-password/${token}">reset password</a>`
+    );
+
+    return true;
+  }
+
+  @Query(() => User, { nullable: true })
+  me(@Ctx() { req }: MyContext) {
+    // you are not logged in
     if (!req.session.UserID) {
       return null;
     }
 
-    const user = await em.findOne(User, { id: req.session.UserID });
-    return user;
+    return User.findOne(req.session.UserID);
   }
 
   @Mutation(() => UserResponse)
   async register(
-    @Arg("options", () => UsernamePasswordInput) options: UsernamePasswordInput,
-    @Ctx() { em, req }: MyContext
+    @Arg("options") options: UsernamePasswordInput,
+    @Ctx() { req }: MyContext
   ): Promise<UserResponse> {
-    /*
-    const hashedPassword = await argon2.hash(options.password);
-    const user = em.create(User, {
-      username: options.username,
-      password: hashedPassword,
-    });
-    await em.persistAndFlush(user);
-    return user;
-    */ //how i created users alsp must change type from userresponse to user
-
-    if (options.username.length <= 2) {
-      return {
-        errors: [
-          {
-            field: "username",
-            message: "length must be greater than 2",
-          },
-        ],
-      };
-    }
-
-    if (options.password.length <= 2) {
-      return {
-        errors: [
-          {
-            field: "password",
-            message: "length must be greater than 2",
-          },
-        ],
-      };
+    const errors = validateRegister(options);
+    if (errors) {
+      return { errors };
     }
 
     const hashedPassword = await argon2.hash(options.password);
-    //let user;
-    const user = em.create(User, {
-      username: options.username,
-      password: hashedPassword,
-    });
+    let user;
     try {
-      await em.persistAndFlush(user);
-      /* //fop whatever dumb reason when i used entity manager to insert a user into orm created_at and updated_at said they where null even thou i was getting a user back so im just using em.create instead
-      const result = await (em as EntityManager)
-        .createQueryBuilder(User)
-        .getKnexQuery()
-        .insert({
+      // User.create({}).save()
+      const result = await getConnection()
+        .createQueryBuilder()
+        .insert()
+        .into(User)
+        .values({
           username: options.username,
+          email: options.email,
           password: hashedPassword,
-          created_at: new Date(),
-          updated_at: new Date(),
-        }) //have to add the create and update because we are using next and not mikro-orm for the insert into the data base
-        .returning("*");
-      user = result[0];
-      */
+        })
+        .returning("*")
+        .execute();
+      console.log("resutl:", result);
+      user = result.raw[0];
     } catch (err) {
-      console.log(err);
+      console.log("err: ", err);
       //|| err.detail.includes("already exists")) {
       // duplicate username error
       if (err.code === "23505") {
@@ -129,9 +176,9 @@ export class UserResolver {
       }
     }
 
-    console.log("i am user: ", user);
-    //store user id session
-    //this will set a cookie on the user and keep them logged in
+    // store user id session
+    // this will set a cookie on the user
+    // keep them logged in
     req.session.UserID = user.id;
 
     return { user };
@@ -139,21 +186,26 @@ export class UserResolver {
 
   @Mutation(() => UserResponse)
   async login(
-    @Arg("options") options: UsernamePasswordInput,
-    @Ctx() { em, req }: MyContext
+    @Arg("usernameOrEmail") usernameOrEmail: string,
+    @Arg("password") password: string,
+    @Ctx() { req }: MyContext
   ): Promise<UserResponse> {
-    const user = await em.findOne(User, { username: options.username });
+    const user = await User.findOne(
+      usernameOrEmail.includes("@")
+        ? { where: { email: usernameOrEmail } }
+        : { where: { username: usernameOrEmail } }
+    );
     if (!user) {
       return {
         errors: [
           {
-            field: "username",
+            field: "usernameOrEmail",
             message: "that username doesn't exist",
           },
         ],
       };
     }
-    const valid = await argon2.verify(user.password, options.password);
+    const valid = await argon2.verify(user.password, password);
     if (!valid) {
       return {
         errors: [
@@ -166,7 +218,6 @@ export class UserResolver {
     }
 
     req.session.UserID = user.id;
-    //req.session.randomKey = "kayden is the man";
 
     return {
       user,
@@ -175,16 +226,16 @@ export class UserResolver {
 
   @Mutation(() => Boolean)
   logout(@Ctx() { req, res }: MyContext) {
-    return new Promise((reslove) =>
+    return new Promise((resolve) =>
       req.session.destroy((err) => {
         res.clearCookie(COOKIE_NAME);
         if (err) {
           console.log(err);
-          reslove(false);
+          resolve(false);
           return;
         }
 
-        reslove(true);
+        resolve(true);
       })
     );
   }

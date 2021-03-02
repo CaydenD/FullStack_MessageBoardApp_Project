@@ -13,25 +13,33 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 require("reflect-metadata");
-const core_1 = require("@mikro-orm/core");
 const constants_1 = require("./constants");
-const mikro_orm_config_1 = __importDefault(require("./mikro-orm.config"));
 const express_1 = __importDefault(require("express"));
 const apollo_server_express_1 = require("apollo-server-express");
 const type_graphql_1 = require("type-graphql");
 const hello_1 = require("./resolvers/hello");
 const post_1 = require("./resolvers/post");
 const user_1 = require("./resolvers/user");
-const redis_1 = __importDefault(require("redis"));
+const ioredis_1 = __importDefault(require("ioredis"));
 const express_session_1 = __importDefault(require("express-session"));
 const connect_redis_1 = __importDefault(require("connect-redis"));
 const cors_1 = __importDefault(require("cors"));
+const typeorm_1 = require("typeorm");
+const Post_1 = require("./entities/Post");
+const User_1 = require("./entities/User");
 const main = () => __awaiter(void 0, void 0, void 0, function* () {
-    const orm = yield core_1.MikroORM.init(mikro_orm_config_1.default);
-    yield orm.getMigrator().up();
+    const conn = yield typeorm_1.createConnection({
+        type: "postgres",
+        database: "lireddit2",
+        username: "postgres",
+        password: "cj52097cayden",
+        logging: true,
+        synchronize: true,
+        entities: [Post_1.Post, User_1.User],
+    });
     const app = express_1.default();
     const RedisStore = connect_redis_1.default(express_session_1.default);
-    const redisClient = redis_1.default.createClient();
+    const redis = new ioredis_1.default();
     app.use(cors_1.default({
         origin: "http://localhost:3000",
         credentials: true,
@@ -39,7 +47,7 @@ const main = () => __awaiter(void 0, void 0, void 0, function* () {
     app.use(express_session_1.default({
         name: constants_1.COOKIE_NAME,
         store: new RedisStore({
-            client: redisClient,
+            client: redis,
             disableTouch: true,
         }),
         cookie: {
@@ -49,7 +57,7 @@ const main = () => __awaiter(void 0, void 0, void 0, function* () {
             secure: constants_1.__prod__,
         },
         saveUninitialized: false,
-        secret: "myguybigman6",
+        secret: "qowiueojwojfalksdjoqiwueo",
         resave: false,
     }));
     const apolloServer = new apollo_server_express_1.ApolloServer({
@@ -57,7 +65,7 @@ const main = () => __awaiter(void 0, void 0, void 0, function* () {
             resolvers: [hello_1.HelloResolver, post_1.PostResolver, user_1.UserResolver],
             validate: false,
         }),
-        context: ({ req, res }) => ({ em: orm.em, req, res }),
+        context: ({ req, res }) => ({ req, res, redis }),
     });
     apolloServer.applyMiddleware({
         app,
