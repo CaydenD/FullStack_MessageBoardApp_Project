@@ -146,7 +146,7 @@ export class UserResolver {
     const hashedPassword = await argon2.hash(options.password);
     let user;
     try {
-      // User.create({}).save()
+      // User.create({}).save() //<- this is the same thing as the whole querybuilder part
       const result = await getConnection()
         .createQueryBuilder()
         .insert()
@@ -158,7 +158,7 @@ export class UserResolver {
         })
         .returning("*")
         .execute();
-      console.log("resutl:", result);
+      //console.log("resutl:", result);
       user = result.raw[0];
     } catch (err) {
       console.log("err: ", err);
