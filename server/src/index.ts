@@ -13,8 +13,7 @@ import cors from "cors";
 import { createConnection } from "typeorm";
 import { Post } from "./entities/Post";
 import { User } from "./entities/User";
-import path from 'path';
-
+import path from "path";
 
 //monkey
 const main = async () => {
@@ -31,7 +30,7 @@ const main = async () => {
 
   await conn.runMigrations();
 
-  //await Post.delete({}); to clean out all posts
+  //await Post.delete({}); //to clean out all posts
 
   const app = express();
 
