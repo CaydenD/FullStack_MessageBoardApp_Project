@@ -6,6 +6,8 @@ import {
   Ctx,
   ObjectType,
   Query,
+  FieldResolver,
+  Root,
 } from "type-graphql";
 import { MyContext } from "../types";
 import { User } from "../entities/User";
@@ -34,8 +36,18 @@ class UserResponse {
   user?: User;
 }
 
-@Resolver()
+@Resolver(User)
 export class UserResolver {
+  @FieldResolver(() => String)
+  email(@Root() user: User, @Ctx() { req }: MyContext) {
+    // this is the current user and its ok to show them their own email
+    if (req.session.UserID === user.id) {
+      return user.email;
+    }
+    // current user wants to see someone elses email
+    return "";
+  }
+
   @Mutation(() => UserResponse)
   async changePassword(
     @Arg("token") token: string,
@@ -146,7 +158,7 @@ export class UserResolver {
     const hashedPassword = await argon2.hash(options.password);
     let user;
     try {
-      // User.create({}).save() //<- this is the same thing as the whole querybuilder part
+      // User.create({}).save()
       const result = await getConnection()
         .createQueryBuilder()
         .insert()
@@ -158,10 +170,8 @@ export class UserResolver {
         })
         .returning("*")
         .execute();
-      //console.log("resutl:", result);
       user = result.raw[0];
     } catch (err) {
-      console.log("err: ", err);
       //|| err.detail.includes("already exists")) {
       // duplicate username error
       if (err.code === "23505") {
