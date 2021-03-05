@@ -13,6 +13,7 @@ export class Updoot extends BaseEntity {
   @Column({ type: "int" })
   value: number;
 
+  //needs to match up i think
   @PrimaryColumn()
   userId: number;
 
@@ -22,6 +23,8 @@ export class Updoot extends BaseEntity {
   @PrimaryColumn()
   postId: number;
 
-  @ManyToOne(() => Post, (post) => post.updoots)
+  @ManyToOne(() => Post, (post) => post.updoots, {
+    onDelete: "CASCADE",
+  })
   post: Post;
 }

@@ -1,5 +1,4 @@
 import "reflect-metadata";
-import { __prod__, COOKIE_NAME } from "./constants";
 import express from "express";
 import { ApolloServer } from "apollo-server-express";
 import { buildSchema } from "type-graphql";
@@ -15,6 +14,7 @@ import { Post } from "./entities/Post";
 import { User } from "./entities/User";
 import path from "path";
 import { Updoot } from "./entities/Updoot";
+import { COOKIE_NAME, __prod__ } from "./constants";
 
 //monkey
 const main = async () => {
@@ -30,7 +30,7 @@ const main = async () => {
   });
   await conn.runMigrations();
 
-  // await Post.delete({});
+  //await Post.delete({});
 
   const app = express();
 

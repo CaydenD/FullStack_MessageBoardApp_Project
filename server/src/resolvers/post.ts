@@ -16,6 +16,7 @@ import {
 } from "type-graphql";
 import { Post } from "../entities/Post";
 import { getConnection } from "typeorm";
+import { Updoot } from "../entities/Updoot";
 
 @InputType()
 class PostInput {
@@ -41,7 +42,7 @@ export class PostResolver {
   }
 
   @Mutation(() => Boolean)
-  @UseMiddleware(isAuth) // requires someone to be logged in to use this route to change something on the backend
+  @UseMiddleware(isAuth)
   async vote(
     @Arg("postId", () => Int) postId: number,
     @Arg("value", () => Int) value: number,
@@ -50,38 +51,82 @@ export class PostResolver {
     const isUpdoot = value !== -1;
     const realValue = isUpdoot ? 1 : -1;
     const { UserID } = req.session;
-    // await Updoot.insert({
-    //   userId,
-    //   postId,
-    //   value: realValue,
-    // });
-    await getConnection().query(
-      `
-    START TRANSACTION;
+    const userId = UserID;
+
+    const updoot = await Updoot.findOne({
+      where: {
+        postId,
+        userId,
+      },
+    });
+
+    // the user has voted on the post before
+    // and they are changing their vote
+    if (updoot && updoot.value !== realValue) {
+      await getConnection().transaction(async (tm) => {
+        await tm.query(
+          `
+    update updoot
+    set value = $1
+    where "postId" = $2 and "userId" = $3
+        `,
+          [realValue, postId, UserID]
+        );
+
+        //vote value 1
+        //post point 1
+        await tm.query(
+          `
+          update post
+          set points = points + $1
+          where id = $2
+        `,
+          [2 * realValue, postId]
+        );
+      });
+    } else if (!updoot) {
+      // has never voted before
+      await getConnection().transaction(async (tm) => {
+        await tm.query(
+          `
     insert into updoot ("userId", "postId", value)
-    values (${UserID},${postId},${realValue});
+    values ($1, $2, $3)
+        `,
+          [UserID, postId, realValue]
+        );
+
+        await tm.query(
+          `
     update post
-    set points = points + ${realValue}
-    where id = ${postId};
-    COMMIT;
-    `
-    );
+    set points = points + $1
+    where id = $2
+      `,
+          [realValue, postId]
+        );
+      });
+    }
     return true;
   }
 
   @Query(() => PaginatedPosts)
   async posts(
     @Arg("limit", () => Int) limit: number,
-    @Arg("cursor", () => String, { nullable: true }) cursor: string | null
+    @Arg("cursor", () => String, { nullable: true }) cursor: string | null,
+    @Ctx() { req }: MyContext
   ): Promise<PaginatedPosts> {
     // 20 -> 21
     const realLimit = Math.min(50, limit);
     const reaLimitPlusOne = realLimit + 1;
 
     const replacements: any[] = [reaLimitPlusOne];
+    if (req.session.UserID) {
+      replacements.push(req.session.UserID);
+    }
 
+    let cursorIdx = 3;
     if (cursor) {
       replacements.push(new Date(parseInt(cursor)));
+      cursorIdx = replacements.length;
     }
 
     const posts = await getConnection().query(
@@ -93,10 +138,15 @@ export class PostResolver {
       'email', u.email,
       'createdAt', u."createdAt",
       'updatedAt', u."updatedAt"
-      ) creator
+      ) creator,
+    ${
+      req.session.UserID
+        ? '(select value from updoot where "userId" = $2 and "postId" = p.id) "voteStatus"'
+        : 'null as "voteStatus"'
+    }
     from post p
     inner join public.user u on u.id = p."creatorId"
-    ${cursor ? `where p."createdAt" < $2` : ""}
+    ${cursor ? `where p."createdAt" < $${cursorIdx}` : ""}
     order by p."createdAt" DESC
     limit $1
     `,
@@ -126,8 +176,8 @@ export class PostResolver {
   }
 
   @Query(() => Post, { nullable: true })
-  post(@Arg("id") id: number): Promise<Post | undefined> {
-    return Post.findOne(id);
+  post(@Arg("id", () => Int) id: number): Promise<Post | undefined> {
+    return Post.findOne(id, { relations: ["creator"] });
   }
 
   @Mutation(() => Post)
@@ -143,23 +193,49 @@ export class PostResolver {
   }
 
   @Mutation(() => Post, { nullable: true })
+  @UseMiddleware(isAuth)
   async updatePost(
-    @Arg("id") id: number,
-    @Arg("title", () => String, { nullable: true }) title: string
+    @Arg("id", () => Int) id: number,
+    @Arg("title") title: string,
+    @Arg("text") text: string,
+    @Ctx() { req }: MyContext
   ): Promise<Post | null> {
-    const post = await Post.findOne(id);
-    if (!post) {
-      return null;
-    }
-    if (typeof title !== "undefined") {
-      await Post.update({ id }, { title });
-    }
-    return post;
+    const result = await getConnection()
+      .createQueryBuilder()
+      .update(Post)
+      .set({ title, text })
+      .where('id = :id and "creatorId" = :creatorId', {
+        id,
+        creatorId: req.session.UserID,
+      })
+      .returning("*")
+      .execute();
+
+    return result.raw[0];
   }
 
   @Mutation(() => Boolean)
-  async deletePost(@Arg("id") id: number): Promise<boolean> {
-    await Post.delete(id);
+  @UseMiddleware(isAuth)
+  async deletePost(
+    @Arg("id", () => Int) id: number,
+    @Ctx() { req }: MyContext
+  ): Promise<boolean> {
+    // not cascade way
+    // const post = await Post.findOne(id);
+    // if (!post) {
+    //   return false;
+    // }
+    // if (post.creatorId !== req.session.userId) {
+    //   throw new Error("not authorized");
+    // }
+
+    // await Updoot.delete({ postId: id });
+    // await Post.delete({ id });
+
+    await Post.delete({
+      id,
+      creatorId: req.session.UserID,
+    });
     return true;
   }
 }

@@ -13,7 +13,6 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 require("reflect-metadata");
-const constants_1 = require("./constants");
 const express_1 = __importDefault(require("express"));
 const apollo_server_express_1 = require("apollo-server-express");
 const type_graphql_1 = require("type-graphql");
@@ -29,6 +28,7 @@ const Post_1 = require("./entities/Post");
 const User_1 = require("./entities/User");
 const path_1 = __importDefault(require("path"));
 const Updoot_1 = require("./entities/Updoot");
+const constants_1 = require("./constants");
 const main = () => __awaiter(void 0, void 0, void 0, function* () {
     const conn = yield typeorm_1.createConnection({
         type: "postgres",
